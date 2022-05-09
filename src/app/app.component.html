@@ -314,6 +314,7 @@
 
     <div *ngIf="hasSessionRefreshRequest else showSessionTime">
       <h2>¿Desea mantener la sesión abierta?</h2>
+      <h4>{{ tempCount }}</h4>
       <button type="button" (click)="doRefresh()">Si</button>
       <button type="button" (click)="doLogout()">No</button>
     </div>

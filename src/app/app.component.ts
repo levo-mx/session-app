@@ -1,5 +1,5 @@
 import {Component} from '@angular/core';
-import {createMachine, interpret, assign, send} from 'xstate';
+import {createMachine, interpret, assign } from 'xstate';
 
 @Component({
   selector: 'app-root',
@@ -14,6 +14,8 @@ export class AppComponent {
   currentSessionTime = 0;
   maxSessionTime = 5;
   timeToExpire = 5;
+  tempCount = 5000;
+  tempCountInterval: any;
 
   constructor() {
   }
@@ -22,47 +24,94 @@ export class AppComponent {
     this.machine = interpret(createMachine(
       {
         id: 'timerSession',
-        initial: 'stopped',
+        initial: 'checkIfIsLoggedIn',
+        strict: true,
         context: {
           maxTimeout: 5000,
           sessionStartDateTime: 0,
         },
         states: {
-          stopped: {
-            entry: ['resetSessionStartTime'],
-            on: {
-              START_TIMER: 'running',
-              EXIT_TIMER: 'exit',
-            },
-          },
-          running: {
-            entry: ['setSessionStartTime'],
+          checkIfIsLoggedIn: {
             invoke: {
-              src: 'sessionChecker',
-            },
+              src: 'doCheckLoggedInStatus',
+              onDone: 'loggedIn',
+              onError: 'loggedOut'
+            }
+          },
+          authUser: {
+            invoke: {
+              src: 'doLogIn',
+              onDone: 'loggedIn',
+              onError: 'loggedOut'
+            }
+          },
+          loggedIn: {
+            id: 'loggedInMachine',
+            initial: 'running',
+            states: {
+              stopped: {
+                entry: ['resetSessionStartTime'],
+                on: {
+                  'always': '#timerSession.loggedOut',
+                },
+              },
+              running: {
+                entry: ['setSessionStartTime'],
+                invoke: {
+                  src: 'sessionChecker',
+                },
+                on: {
+                  STOP_TIMER: 'stopped',
+                  REFRESH_TIMER: 'running',
+                  REQUEST_REFRESH: 'waitingRefresh',
+                },
+              },
+              waitingRefresh: {
+                entry: ['askForRefresh'],
+                on: {
+                  STOP_TIMER: 'stopped',
+                  REFRESH_TIMER: 'running',
+                },
+                after: {
+                  WAITING_ANSWER_TIMEOUT: 'stopped',
+                },
+              },
+              exit: {
+                type: 'final',
+              },
+            }
+          },
+          loggedOut: {
+            entry: ['deleteUserData'],
             on: {
-              STOP_TIMER: 'stopped',
-              REFRESH_TIMER: 'running',
-              REQUEST_REFRESH: 'waitingRefresh',
-            },
-          },
-          waitingRefresh: {
-            entry: ['askForRefresh'],
-            on: {
-              STOP_TIMER: 'stopped',
-              REFRESH_TIMER: 'running',
-            },
-            after: {
-              WAITING_ANSWER_TIMEOUT: 'stopped',
-            },
-          },
-          exit: {
-            type: 'final',
-          },
+              REQUEST_LOGIN: 'authUser',
+            }
+          }
         },
       },
       {
         services: {
+          // AUTH SERVICES
+          doCheckLoggedInStatus: async () => {
+            try {
+              const isLogged = await Promise.reject('No tiene session');
+            } catch (e) {
+              console.error('error on Log', e);
+              throw Error(); // propagar Excepción
+            }
+          },
+          doLogIn: async () => {
+            console.log('DO LOGIN');
+            try {
+              await Promise.resolve('Login a Firebase');
+              this.hasSession = true;
+            } catch (e) {
+              console.error('error on Log', e);
+              throw Error(); // propagar Excepción
+            }
+          },
+
+          // TIMER SERVICES
           sessionChecker: (context, event) => (callback, onReceive) => {
 
             onReceive((event) => {
@@ -71,7 +120,6 @@ export class AppComponent {
                 callback('REFRESH_TIMER');
               }
             });
-
             const checker = setInterval(() => {
               const diff =
                 Math.floor(new Date().getTime() / 1000) -
@@ -92,7 +140,11 @@ export class AppComponent {
           },
         },
         actions: {
-           askForRefresh: () => {
+          deleteUserData: () => {
+            console.log('delete user Data');
+            sessionStorage.removeItem('sessionStartDateTime');
+          },
+          askForRefresh: () => {
             this.askToContinue();
           },
           setSessionStartTime: assign((context, event) => {
@@ -105,31 +157,31 @@ export class AppComponent {
               sessionStartDateTime: startDateTime
             };
           }),
-          resetSessionStartTime: assign(() => {
-            console.log('SESSION RESET TIME');
+          resetSessionStartTime: (context, event) => {
+            console.log('SESSION RESET TIME', context, event);
+            if(this.tempCountInterval) { clearInterval(this.tempCountInterval)}
+            this.tempCount = 5000;
+            this.timeToExpire = this.maxSessionTime;
             this.currentSessionTime = 0;
             this.hasSession = false;
             this.hasSessionRefreshRequest = false;
-            return {
-              sessionStartDateTime: 0
-            };
-          })
+          }
         },
         delays: {
           WAITING_ANSWER_TIMEOUT: 5000,
         },
       }
     )).onTransition((event) => {
-      console.warn('event', event.value)
+      console.warn('event', event.value);
     }).start();
   }
 
   doLogin() {
-    console.log('haciendo LOGIN');
+    console.log('DOING REAL LOGIN');
     setTimeout(() => {
       // request LOGIN TO BackEnd
-      this.machine.send('START_TIMER');
-      this.hasSession = true;
+      // this.machine.send('START_TIMER');
+      this.machine.send('REQUEST_LOGIN');
     }, 1000);
   }
 
@@ -142,6 +194,9 @@ export class AppComponent {
   }
 
   askToContinue() {
+    this.tempCountInterval = setInterval(() => {
+      this.tempCount -= 100;
+    }, 100);
     this.hasSessionRefreshRequest = true;
   }
 
